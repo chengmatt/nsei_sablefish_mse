@@ -10,16 +10,14 @@ library(here)
 library(SPoRC)
 library(furrr)
 library(future)
+library(progressr)
 
 # Source functions
 source(here("R", 'functions', 'utils.R'))
 source(here("R", 'functions', 'setup_em.R'))
 
-# Read in files
+# Read in MSE OM
 sim_list <- readRDS(here("outputs", 'base_mse_om.RDS'))
-
-# Setup simulation environment
-sim_env <- Setup_sim_env(sim_list)
 
 # Reference Point Options -------------------------------------------------
 reference_points_opt <- list(
@@ -51,22 +49,15 @@ proj_opt <- list(
 
 
 # Helper Functions -----------------------------------------------------------------
-# Deep copy function for environments
-deep_copy_env <- function(env) {
-  new_env <- new.env(parent = parent.env(env))
-  for (nm in ls(env, all.names = TRUE)) {
-    val <- get(nm, envir = env)
-    if (is.environment(val)) val <- deep_copy_env(val)
-    assign(nm, val, envir = new_env)
-  }
-  new_env
-}
+run_single_sim <- function(sim, sim_list, reference_points_opt, proj_opt) {
 
-# single simulation instance
-run_single_sim <- function(sim, sim_env_template) {
+  # Ensure worker has all dependencies
+  library(SPoRC)
+  source(here::here("R", "functions", "utils.R"))
+  source(here::here("R", "functions", "setup_em.R"))
 
-  # Each sim gets its own copy
-  sim_env <- deep_copy_env(sim_env_template)
+  # Each worker creates its own sim_env from the serializable sim_list
+  sim_env <- Setup_sim_env(sim_list)
 
   # setup dimensions for storage
   n_yrs <- sim_env$n_yrs
@@ -76,85 +67,103 @@ run_single_sim <- function(sim, sim_env_template) {
   # Storage for this sim
   ssb_em_list <- vector("list", n_asmt_yrs)
   conv_vec    <- rep(NA, n_asmt_yrs)
-  maxgrad_vec <- rep(NA, n_asmt_yrs)
-  catch_vec   <- rep(NA, n_asmt_yrs)
-  ref_pt_vec  <- rep(NA, n_asmt_yrs)
 
   # Run MSE
-  for (y in 1:n_yrs) {
+  for (y in 1:sim_env$n_yrs) {
+
     # Run Annual Cycle (anything prior to feedback = conditioning period)
     run_annual_cycle(y, sim, sim_env)
 
     # Start Assessment / Projection Period
     if (y >= sim_env$feedback_start_yr) {
+
+      # Index for when assessment starts
       asmt_idx <- y - sim_env$feedback_start_yr + 1
 
-      # Setup EM
-      tmp_list  <- setup_em(sim_env, y, sim)
-      asmt_data <- tmp_list$data
+      # Get Assessment Results
+      local_y <- y
+      local_sim <- sim
+      asmt_result <- tryCatch({
 
-      # Fit EM
-      obj <- fit_model(
-        asmt_data,
-        tmp_list$par,
-        tmp_list$map,
-        NULL,
-        newton_loops = 0,
-        silent = TRUE
-      )
+        # Setup EM
+        tmp_list  <- setup_em(sim_env, local_y, local_sim)
+        asmt_data <- tmp_list$data
 
-      # Get sdreport
-      sd_rep <- sdreport(obj)
+        # Fit EM
+        obj <- fit_model(
+          asmt_data,
+          tmp_list$par,
+          tmp_list$map,
+          NULL,
+          newton_loops = 0,
+          silent = TRUE
+        )
+
+        # Get sdreport
+        sd_rep <- sdreport(obj)
+
+        # Derive Reference Points from Model
+        reference_points <- get_closed_loop_reference_points(
+          use_true_values = FALSE,
+          sim_env = sim_env,
+          asmt_data = asmt_data,
+          asmt_rep = obj$rep,
+          y = local_y,
+          sim = local_sim,
+          reference_points_opt = reference_points_opt,
+          n_proj_yrs = proj_opt$n_proj_yrs
+        )
+
+        # Run Projection to Get Catch Advice
+        tmp_catch <- get_proj_catch(obj, asmt_data, proj_opt, reference_points, sim_env, local_y, local_sim)
+
+        # Convert Prescribed Catch to True Fishing Mortality
+        if (local_y < sim_env$n_yrs) catch_to_f(tmp_catch, sim_env, local_y, local_sim)
+
+        list(
+          success = TRUE,
+          ssb_em = obj$rep$SSB[1:local_y],
+          conv = post_optim_sanity_checks(sd_rep, obj$rep, gradient_tol = 0.01)
+        )
+
+      }, error = function(e) {
+        message(sprintf("Sim %d, year %d failed: %s", local_sim, local_y, e$message))
+        list(success = FALSE, ssb_em = NULL, conv = NA)
+      })
 
       # Store EM Results
-      ssb_em_list[[asmt_idx]] <- obj$rep$SSB[1:y]
-      conv_vec[asmt_idx]      <- obj$opt$convergence
-      maxgrad_vec[asmt_idx]   <- max(abs(obj$opt$gr))
+      ssb_em_list[[asmt_idx]] <- asmt_result$ssb_em
+      conv_vec[asmt_idx]      <- asmt_result$conv
 
-      # Derive Reference Points from Model
-      reference_points <- get_closed_loop_reference_points(
-        use_true_values = FALSE,
-        sim_env = sim_env,
-        asmt_data = asmt_data,
-        asmt_rep = obj$rep,
-        y = y,
-        sim = sim,
-        reference_points_opt = reference_points_opt,
-        n_proj_yrs = proj_opt$n_proj_yrs
-      )
-
-      # Run Projection to Get Catch Advice
-      tmp_catch <- get_proj_catch(obj, asmt_data, proj_opt, reference_points, sim_env)
-
-      catch_vec[asmt_idx]  <- tmp_catch
-      ref_pt_vec[asmt_idx] <- reference_points$F_target
-
-      # Convert Prescribed Catch to True Fishing Mortality
-      if (y < n_yrs) catch_to_f(tmp_catch, sim_env)
     } # end feedback
   } # end y
 
   # Return everything for this sim
   list(
-    sim_env     = sim_env,
-    ssb_em      = ssb_em_list,
+    sim_env = sim_env,
+    ssb_em  = ssb_em_list,
     convergence = conv_vec,
-    maxgrad     = maxgrad_vec,
-    catch       = catch_vec,
-    ref_pts     = ref_pt_vec
+    failed = FALSE,
+    failure_year = NA
   )
 }
 
 
 # Run in Parrallel --------------------------------------------------------
 options(future.globals.maxSize = 1.5 * 1024^3)
-plan(multisession, workers = availableCores() - 5)
+plan(multisession, workers = 1)
+
 results <- future_map(
-  1:sim_env$n_sims,
-  ~ run_single_sim(.x, sim_env),
+  1:sim_list$n_sims,
+  ~ run_single_sim(.x, sim_list, reference_points_opt, proj_opt),
   .options = furrr_options(seed = TRUE),
   .progress = TRUE
 )
 
-# Extract sim_envs ----------------------------------------------------------
-sim_envs <- lapply(results, \(x) x$sim_env)
+
+# # Extract sim_envs ----------------------------------------------------------
+# sim_envs <- lapply(results, \(x) x$sim_env)
+#
+# run_single_sim(sim = 1, sim_env_template = sim_env)
+
+

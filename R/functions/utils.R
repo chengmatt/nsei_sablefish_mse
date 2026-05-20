@@ -2,7 +2,7 @@
 # Creator: Matthew LH. Cheng
 # Date 5/20/26
 
-catch_to_f <- function(catch, sim_env) {
+catch_to_f <- function(catch, sim_env, y, sim) {
 
   # get F
   tmp_f <- catch_to_F_singlefleet(
@@ -21,7 +21,7 @@ catch_to_f <- function(catch, sim_env) {
   sim_env$Fmort[,y+1,,,sim] <- array(tmp_f, dim = c(sim_env$n_regions, sim_env$n_seas, sim_env$n_fish_fleets)) # assign bisection values back into simulation
 }
 
-get_proj_catch <- function(obj, asmt_data, proj_opt, reference_points, sim_env) {
+get_proj_catch <- function(obj, asmt_data, proj_opt, reference_points, sim_env, y, sim) {
 
   # Get inputs for projection
   tmp_terminal_NAA <- array(obj$rep$NAA[,,y,,,], dim = c(asmt_data$n_pop, asmt_data$n_regions, asmt_data$n_seas, length(asmt_data$ages), asmt_data$n_sexes)) # terminal numbers at age

@@ -117,6 +117,12 @@ setup_em <- function(sim_env, y, sim) {
 
 
   # Fishery selectivity and catchability
+  ret_sel_array <- array(NA, dim = c(input_list$data$n_pop, input_list$data$n_regions,
+                                     length(input_list$data$years), input_list$data$n_seas,
+                                     length(input_list$data$ages), input_list$data$n_sexes,
+                                     input_list$data$n_fish_fleets))
+  ret_sel_array[] <- sim_env$ret_sel[,,1:y,,,,,sim]
+
   input_list <- Setup_Mod_Fishsel_and_Q(
     input_list = input_list,
     # Model options
@@ -136,14 +142,7 @@ setup_em <- function(sim_env, y, sim) {
       'Block_3_Year_48-terminal_Fleet_1'
     ),
     use_fixed_ret_sel = 1,
-    ret_sel_input = { # input fixed retention curve
-      tmp = array(NA, dim = c(input_list$data$n_pop, input_list$data$n_regions,
-                              length(input_list$data$years), input_list$data$n_seas,
-                              length(input_list$data$ages), input_list$data$n_sexes, input_list$data$n_fish_fleets ))
-
-      tmp[] = sim_env$ret_sel[,,1:y,,,,,sim]
-      tmp
-    }
+    ret_sel_input = ret_sel_array # fixed retention curve
   )
 
   # Survey selectivity and catchability
@@ -176,6 +175,10 @@ setup_em <- function(sim_env, y, sim) {
     Wt_SrvLenComps = array(1, dim = c(input_list$data$n_regions, length(input_list$data$years), input_list$data$n_seas,
                                       input_list$data$n_sexes, input_list$data$n_srv_fleets))
   )
+
+  # Starting values for selectivity parameters
+  input_list$par$fish_fixed_sel_pars[] <- log(2)
+  input_list$par$srv_fixed_sel_pars[] <- log(2)
 
   return(input_list)
 }

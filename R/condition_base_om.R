@@ -16,9 +16,9 @@ data <- readRDS(here("inputs", 'sablefish_data_19May2026.RDS'))
 
 ### OM Dimensions -----------------------------------------------------------
 set.seed(123)
-n_sims <- 30
+n_sims <- 50
 n_yrs <- length(rep$Fmort)
-closed_loop_yrs <- 10
+closed_loop_yrs <- 5
 n_ages <- 30
 n_lens <- 30
 n_sexes <- 2
@@ -88,7 +88,7 @@ ISS_FishLenComps <- array(round(mean(data$effn_fsh_len)) * 0.5, dim = c(n_region
 sim_list <- Setup_Sim_Fishing(
   sim_list = sim_list, # update simulate list
   ln_sigmaC = array(log(0.05), dim = c(n_regions, n_yrs + closed_loop_yrs, n_seas, n_fish_fleets)),
-  Fmort_input = extend_years(replicate(n = n_sims, Fmort), n_years = closed_loop_yrs, 2, fill = 'zeros'),
+  Fmort_input = SPoRC:::extend_years(replicate(n = n_sims, Fmort), n_years = closed_loop_yrs, 2, fill = 'zeros'),
   dmr_input = array(0.16, dim = c(n_regions, n_yrs + closed_loop_yrs, n_seas, n_fish_fleets, n_sims)),
   fish_sel_input = fish_sel_input,
   ret_sel_input = ret_sel_input,
