@@ -170,6 +170,7 @@ results <- future_map(
 saveRDS(results, here("scratch", "om_em_bias_test.RDS"))
 
 # Process Results ---------------------------------------------------------
+results <- readRDS(here("scratch", "om_em_bias_test.RDS"))
 par(mfrow = c(3, 2), mar = c(4, 5, 3, 1))
 
 n_sims <- length(results)
