@@ -16,9 +16,9 @@ data <- readRDS(here("inputs", 'sablefish_data_19May2026.RDS'))
 
 ### OM Dimensions -----------------------------------------------------------
 set.seed(123)
-n_sims <- 1
+n_sims <- 50
 n_yrs <- length(rep$Fmort)
-closed_loop_yrs <- 1
+closed_loop_yrs <- 5
 n_ages <- 30
 n_lens <- 30
 n_sexes <- 2
