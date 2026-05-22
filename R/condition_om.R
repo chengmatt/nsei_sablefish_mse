@@ -16,9 +16,9 @@ data <- readRDS(here("inputs", 'sablefish_data_19May2026.RDS'))
 
 ### OM Dimensions -----------------------------------------------------------
 set.seed(123)
-n_sims <- 50
+n_sims <- 1
 n_yrs <- length(rep$Fmort)
-closed_loop_yrs <- 5
+closed_loop_yrs <- 60
 n_ages <- 30
 n_lens <- 30
 n_sexes <- 2
@@ -235,5 +235,104 @@ sim_list <- Setup_Sim_Tagging(
 sim_list$Movement <- array(1, dim = c(n_pop, n_regions, n_regions, n_yrs + closed_loop_yrs, n_seas, n_ages, n_sexes, n_sims))
 sim_list$sgl_seas_spawning_movement <- array(1, dim = c(n_pop, n_regions, n_regions, n_yrs + closed_loop_yrs, n_ages, n_sexes, n_sims))
 
-# Save conitioned OM
+# Base OM -----------------------------------------------------------------
 saveRDS(sim_list, here("outputs", "base_mse_om.RDS"))
+
+# BH Regime ---------------------------------------------------------------
+sim_list <- Setup_Sim_Rec(
+  sim_list = sim_list,
+  init_age_strc = "scalar_no_move",
+
+  # R0 for BH rec
+  R0_input = {
+    tmp <- array(NA, dim = c(n_pop, n_regions, n_yrs + closed_loop_yrs, n_sims))
+    log_rbar <- out$rep$par.fixed[names(out$rep$par.fixed) == 'log_rbar']
+    log_rinit <- out$rep$par.fixed[names(out$rep$par.fixed) == 'log_rinit']
+    # Baseline
+    tmp[,,1:n_yrs,] <- exp(log_rbar)
+    tmp[,,1,] <- exp(log_rinit)
+    # Cycling regimes in projection period: 15 yr crash, 15 yr increase, repeat
+    crash_start <- 52
+    cycle_length <- 30  # 15 low + 15 high
+    proj_yrs <- (n_yrs + 1):(n_yrs + closed_loop_yrs)
+    for (yr in proj_yrs) {
+      if (yr < crash_start) {
+        tmp[,,yr,] <- exp(log_rbar)
+      } else {
+        pos_in_cycle <- (yr - crash_start) %% cycle_length
+        if (pos_in_cycle < 15) {
+          # Base phase
+          tmp[,,yr,] <- exp(log_rbar)
+        } else {
+          # Boom phase
+          tmp[,,yr,] <- exp(log_rbar) * 5
+        }
+      }
+    }
+    tmp
+  },
+  # Steepness
+  h_input = array(0.8, dim = c(n_pop, n_regions, n_yrs + closed_loop_yrs, n_sims)),
+  sexratio_input = array(0.5, dim = c(n_pop, n_regions, n_yrs + closed_loop_yrs, n_sexes, n_sims)),
+  ln_sigmaR = array(log(0), dim = c(2, n_pop, n_regions)),
+  Rec_input = {
+    tmp <- array(NA, dim = c(n_pop, n_regions, n_yrs, n_sims))
+    for(i in 1:n_sims) tmp[1,1,,i] <- rep$pred_rec
+    tmp
+  },
+  ln_InitDevs_input = {
+    tmp <- array(NA, dim = c(n_pop, n_regions, n_ages - 1, n_sims))
+    for(i in 1:n_sims) tmp[1,1,,i] <- c(out$rep$par.fixed[names(out$rep$par.fixed) == 'log_rinit_devs'], 0) # input 0 for plus group
+    tmp
+  },
+  recruitment_opt = 'bh_rec',
+  t_spawn = data$spawn_month
+)
+
+saveRDS(sim_list, here("outputs", "bh_regime_mse_om.RDS"))
+
+# Crash -------------------------------------------------------------------
+sim_list <- Setup_Sim_Rec(
+  sim_list = sim_list,
+  init_age_strc = "scalar_no_move",
+  # R0 for BH rec
+  R0_input = {
+    tmp <- array(NA, dim = c(n_pop, n_regions, n_yrs + closed_loop_yrs, n_sims))
+    log_rbar <- out$rep$par.fixed[names(out$rep$par.fixed) == 'log_rbar']
+    log_rinit <- out$rep$par.fixed[names(out$rep$par.fixed) == 'log_rinit']
+    # Baseline
+    tmp[,,1:n_yrs,] <- exp(log_rbar)
+    tmp[,,1,] <- exp(log_rinit)
+    # Crash for first 30 projection years, then recover
+    crash_start <- n_yrs + 1
+    crash_end <- n_yrs + 30
+    proj_yrs <- (n_yrs + 1):(n_yrs + closed_loop_yrs)
+    for (yr in proj_yrs) {
+      if (yr >= crash_start & yr <= crash_end) {
+        tmp[,,yr,] <- exp(log_rbar) * 0.1
+      } else {
+        tmp[,,yr,] <- exp(log_rbar) * 3
+      }
+    }
+    tmp
+  },
+  # Steepness
+  h_input = array(0.8, dim = c(n_pop, n_regions, n_yrs + closed_loop_yrs, n_sims)),
+  sexratio_input = array(0.5, dim = c(n_pop, n_regions, n_yrs + closed_loop_yrs, n_sexes, n_sims)),
+  ln_sigmaR = array(log(0), dim = c(2, n_pop, n_regions)),
+  Rec_input = {
+    tmp <- array(NA, dim = c(n_pop, n_regions, n_yrs, n_sims))
+    for(i in 1:n_sims) tmp[1,1,,i] <- rep$pred_rec
+    tmp
+  },
+  ln_InitDevs_input = {
+    tmp <- array(NA, dim = c(n_pop, n_regions, n_ages - 1, n_sims))
+    for(i in 1:n_sims) tmp[1,1,,i] <- c(out$rep$par.fixed[names(out$rep$par.fixed) == 'log_rinit_devs'], 0)
+    tmp
+  },
+  recruitment_opt = 'bh_rec',
+  t_spawn = data$spawn_month
+)
+
+saveRDS(sim_list, here("outputs", "bh_crash_mse_om.RDS"))
+
