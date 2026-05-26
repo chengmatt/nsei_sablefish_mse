@@ -89,7 +89,7 @@ get_proj_catch <- function(obj, asmt_data, proj_opt, reference_points, sim_env, 
     b_ref_pt = b_ref,
     HCR_function = proj_opt$HCR_function,
     recruitment_opt = proj_opt$recruitment_opt,
-    fmort_opt = 'Input',
+    fmort_opt = proj_opt$fmort_opt,
     t_spawn = sim_env$t_spawn,
     bh_rec_opt = proj_opt$bh_rec_opt
   )

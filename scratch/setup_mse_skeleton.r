@@ -96,7 +96,6 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
   proj_opt <- list(
     n_proj_yrs     = 2,
     HCR_function   = hcr_fn,
-    HCR_alpha      = alpha,
     recruitment_opt = "mean_rec",
     fmort_opt      = "HCR",
     bh_rec_opt     = NULL
@@ -185,13 +184,15 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
         dyn_bx     = if (use_dyn_b0) spr_x else spr_x
       )
 
-      # Apply Stability Constraint
-      constrained_catch <- apply_stability(
-        new_catch    = as.vector(tmp_catch),
-        prev_catch   = sim_env$TrueCatch[1,y-1,1,1,sim], # use previous years catch
-        max_increase = stab$max_increase,
-        max_decrease = stab$max_decrease
-      )
+      # Apply Stability Constraint (only when catch from the base HCR is not 0)
+      if(tmp_catch != 0) {
+        constrained_catch <- apply_stability(
+          new_catch    = as.vector(tmp_catch),
+          prev_catch   = sim_env$TrueCatch[1,y-1,1,1,sim], # use previous years catch
+          max_increase = stab$max_increase,
+          max_decrease = stab$max_decrease
+        )
+      }
 
       # Catch to F
       if (local_y < n_yrs) {
@@ -385,6 +386,7 @@ results_list <- lapply(om_scenarios, function(om) {
   sim_list <- om$sim_list
 
   perf <- do.call(rbind, lapply(1:length(all_results), function(i) {
+    i = 1
     sc <- all_results[[i]]$scenario
     ssb_mat <- sapply(all_results[[i]]$results, function(x) x$om$SSB)
     catch_mat <- sapply(all_results[[i]]$results, function(x) x$om$Catch)
@@ -394,6 +396,12 @@ results_list <- lapply(om_scenarios, function(om) {
     fb <- sim_list$feedback_start_yr
     proj_rows <- fb:nrow(ssb_mat)
     ssb_threshold <- max(all_results[[i]]$results[[1]]$om$SSB[seq_len(fb - 1)]) * 0.1
+
+
+    plot(apply(ssb_mat[proj_rows, ], 1, median), ylim = c(0,1e6))
+    plot(apply(catch_mat[proj_rows, ], 1, median), ylim = c(0,1e5))
+
+
     data.frame(
       scenario_id = sc$scenario_id, spr_x = sc$spr_x, alpha = sc$alpha,
       brp_type = sc$brp_type, dyn_b0 = sc$dyn_b0, stability = sc$stability,
