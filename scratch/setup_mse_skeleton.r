@@ -114,9 +114,7 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
   pdHess_vec  <- rep(NA, n_asmt)
   grad_vec    <- rep(NA, n_asmt)
   bx_vec      <- rep(NA, n_asmt)
-  catch_vec   <- rep(NA, n_asmt)  # prescribed catch (post-stability)
 
-  # Run MSE
   for (y in 1:n_yrs) {
 
     # Run Annual Cycle
@@ -131,13 +129,17 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
       # Run Assessment
       if (!use_true_values) {
         asmt_result <- tryCatch({
+
+          # Setup data lists and model
           tmp_list  <- setup_em(sim_env, local_y, local_sim)
           asmt_data <- tmp_list$data
+
           obj <- fit_model(
             asmt_data, tmp_list$par, tmp_list$map, NULL,
             newton_loops = 0, silent = TRUE
           )
           sd_rep <- sdreport(obj)
+
           list(
             success = TRUE,
             ssb_em  = obj$rep$SSB[1:local_y],
@@ -153,11 +155,19 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
       }
 
       # Get Reference Points
+      # input 1 so get_closed_loop_reference_points still optimizes and get_proj_catch works
+      tmp_sim_env <- sim_env
+      if (sim_env$Fmort[,y,,,sim] == 0) tmp_sim_env$Fmort[,y,,,sim] <- 1
+      tmp_obj <- if (use_true_values) NULL else obj
+      if (!use_true_values && !is.null(tmp_obj) && tmp_obj$rep$Fmort[,y,,] == 0) {
+        tmp_obj$rep$Fmort[] <- 1
+      }
+
       reference_points <- get_closed_loop_reference_points(
         use_true_values    = use_true_values,
-        sim_env            = sim_env,
+        sim_env            = tmp_sim_env,
         asmt_data          = if (use_true_values) NULL else asmt_data,
-        asmt_rep           = if (use_true_values) NULL else obj$rep,
+        asmt_rep           = tmp_obj$rep,
         y                  = local_y,
         sim                = local_sim,
         reference_points_opt = reference_points_opt,
@@ -166,7 +176,7 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
 
       # Get Catch Advice
       tmp_catch <- get_proj_catch(
-        obj, if (use_true_values) NULL else asmt_data,
+        tmp_obj, if (use_true_values) NULL else asmt_data,
         proj_opt, reference_points,
         sim_env, local_y, local_sim,
         use_true_values,
@@ -183,8 +193,11 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
         max_decrease = stab$max_decrease
       )
 
-      # Catch to F (Provides Small F (~1e-9 if catch = 0))
-      if (local_y < n_yrs) catch_to_f(constrained_catch, sim_env, local_y, local_sim)
+      # Catch to F
+      if (local_y < n_yrs) {
+        if(constrained_catch != 0) catch_to_f(constrained_catch, sim_env, local_y, local_sim)
+        else sim_env$Fmort[,y+1,,,sim] <- 0
+      }
 
       # Storage
       ssb_em_list[[asmt_idx]] <- asmt_result$ssb_em
@@ -201,6 +214,8 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
     om = list(
       SSB   = sim_env$SSB[,,,sim],
       Catch = sim_env$TrueCatch[,,,,sim],
+      CAA   = sim_env$CAA[,,,,,,,sim],
+      CAL   = sim_env$CAL[,,,,,,,sim],
       NAA   = sim_env$NAA[,,,,,,sim],
       Rec   = sim_env$Rec[,,,sim],
       Fmort = sim_env$Fmort[,,,,sim]
@@ -217,7 +232,6 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
 options(future.globals.maxSize = 5 * 1024^3)
 plan(multisession, workers = availableCores() - 3)
 
-
 # Read in MSE OM
 sim_list <- readRDS(here("outputs", 'base_mse_om.RDS'))
 
@@ -228,7 +242,7 @@ for (sc in seq_len(nrow(scenario_grid))) {
 
   scenario <- scenario_grid[sc, ]
   cat(sprintf(
-    "\n===== Scenario %d/%d: SPR=%.1f, alpha=%.2f, BRP=%s, dynB0=%s, stab=%s =====\n",
+    "\n Scenario %d/%d: SPR=%.1f, alpha=%.2f, BRP=%s, dynB0=%s, stab=%sn",
     sc, nrow(scenario_grid),
     scenario$spr_x, scenario$alpha, scenario$brp_type,
     scenario$dyn_b0, scenario$stability
@@ -349,7 +363,10 @@ library(vegan)
 library(ggplot2)
 library(here)
 
-# Load all three OM scenarios
+# Read in pricing stuff
+price_mod <- readRDS(here("outputs", 'price_model.RDS'))
+grade_df <- read.csv(here("outputs", 'rel_grade_price.csv'))
+
 om_scenarios <- list(
   list(name = "Baseline",
        results = readRDS(here('scratch', 'base_results.RDS')),
@@ -362,101 +379,137 @@ om_scenarios <- list(
        sim_list = readRDS(here("outputs", 'bh_crash_mse_om.RDS')))
 )
 
-# Extract performance metrics across all OM scenarios
-perf <- do.call(rbind, lapply(om_scenarios, function(om) {
+results_list <- lapply(om_scenarios, function(om) {
+
   all_results <- om$results
   sim_list <- om$sim_list
 
-  do.call(rbind, lapply(1:length(all_results), function(i) {
+  perf <- do.call(rbind, lapply(1:length(all_results), function(i) {
     sc <- all_results[[i]]$scenario
     ssb_mat <- sapply(all_results[[i]]$results, function(x) x$om$SSB)
     catch_mat <- sapply(all_results[[i]]$results, function(x) x$om$Catch)
-
+    catch_mat[catch_mat == 0] <- 1e-3 # add 0 to guard against aav calcs
+    naa_array <- abind::abind(lapply(all_results[[i]]$results, function(x) x$om$NAA), along = 4)
+    caa_array <- abind::abind(lapply(all_results[[i]]$results, function(x) x$om$CAA), along = 4)
     fb <- sim_list$feedback_start_yr
     proj_rows <- fb:nrow(ssb_mat)
-
+    ssb_threshold <- max(all_results[[i]]$results[[1]]$om$SSB[seq_len(fb - 1)]) * 0.1
     data.frame(
-      om_scenario = om$name,
-      scenario_id = sc$scenario_id,
-      spr_x       = sc$spr_x,
-      alpha       = sc$alpha,
-      brp_type    = sc$brp_type,
-      dyn_b0      = sc$dyn_b0,
-      stability   = sc$stability,
-      med_ssb     = median(ssb_mat[proj_rows, ]),
-      p_crash     = mean(apply(ssb_mat[proj_rows, , drop=FALSE], 2, min) <
-                           min(all_results[[1]]$results[[1]]$om$SSB[1:51]) * 0.1),
-      ssb_cv      = median(apply(ssb_mat[proj_rows, , drop=FALSE], 2, sd) /
-                             apply(ssb_mat[proj_rows, , drop=FALSE], 2, mean)),
-      med_catch   = median(catch_mat[proj_rows, ]),
-      catch_cv    = median(apply(catch_mat[proj_rows, , drop=FALSE], 2, sd) /
-                             apply(catch_mat[proj_rows, , drop=FALSE], 2, mean)),
-      catch_aav   = median(sapply(1:ncol(catch_mat), function(j) {
+      scenario_id = sc$scenario_id, spr_x = sc$spr_x, alpha = sc$alpha,
+      brp_type = sc$brp_type, dyn_b0 = sc$dyn_b0, stability = sc$stability,
+      med_ssb = median(ssb_mat[proj_rows, ]),
+      mean_age = mean(apply(naa_array[proj_rows,,,,drop = F], c(1, 4), function(mat) {
+        n_total <- sum(mat)
+        if (n_total == 0) return(NA)
+        sum(mat * 2:31) / n_total
+      })),
+      pielou_j = mean(apply(naa_array[proj_rows,,,,drop = F], c(1, 4), function(mat) {
+        n_total <- sum(mat)
+        if (n_total == 0) return(NA)
+        p <- mat / n_total
+        p <- p[p > 0]
+        H <- -sum(p * log(p))
+        H / log(length(p))
+      })),
+      econ_value = mean(sapply(1:ncol(ssb_mat), function(j) {
+        proj_vals <- sapply(proj_rows, function(y) {
+          n_total <- sum(naa_array[y,,,j]) # get total N
+          rel_price_base <- as.numeric(predict(price_mod, newdata = data.frame(n = n_total), type = "response")) # predict price based on N
+          caa_female <- caa_array[y,,1,j] # get female catch-at-age
+          caa_male   <- caa_array[y,,2,j] # get male catch-at-age
+          # multiply, grade relative pricing, and predicted relative pricing
+          value_male   <- sum(caa_male * grade_age_df$rel_price_male * rel_price_base, na.rm = TRUE)
+          value_female <- sum(caa_female * grade_age_df$rel_price_female * rel_price_base, na.rm = TRUE)
+          value_male + value_female
+        })
+        median(proj_vals)
+      })),
+      p_crash = mean(ssb_mat[proj_rows, ] < ssb_threshold),
+      p_zero_cat = mean(catch_mat[proj_rows, ] == 0),
+      med_catch = median(catch_mat[proj_rows, ]),
+      catch_aav = median(sapply(1:ncol(catch_mat), function(j) {
         cc <- catch_mat[proj_rows, j]
         mean(abs(diff(cc)) / head(cc, -1), na.rm = TRUE)
       }))
     )
   }))
-}))
 
-# NMDS on combined set
-metric_cols <- c("med_ssb", "med_catch", "catch_aav")
-perf_scaled <- scale(as.matrix(perf[, metric_cols]))
-d <- dist(perf_scaled, method = "euclidean")
+  # Include p_crash for non-baseline scenarios
+  if (om$name == "Crash") {
+    use_metrics <- c("med_ssb", "med_catch", "catch_aav", "p_crash",
+                     "mean_age", "pielou_j", 'econ_value')
+  } else {
+    use_metrics <- c("med_ssb", "med_catch", "catch_aav", "mean_age", "pielou_j", 'econ_value')
+  }
 
-set.seed(42)
-nmds <- metaMDS(d, k = 2, trymax = 200, autotransform = FALSE)
-cat("Stress:", nmds$stress, "\n")
+  perf_scaled <- scale(as.matrix(perf[, use_metrics]))
+  set.seed(42)
+  nmds <- metaMDS(dist(perf_scaled), k = 2, trymax = 200, autotransform = FALSE)
+  ef <- envfit(nmds, perf_scaled, permutations = 999)
 
-nmds_df <- data.frame(
-  NMDS1 = nmds$points[, 1],
-  NMDS2 = nmds$points[, 2],
-  perf
-)
+  vec_df <- as.data.frame(ef$vectors$arrows * sqrt(ef$vectors$r))
+  vec_df$label <- rownames(vec_df)
+  arrow_scale <- 0.6 * max(abs(nmds$points))
+  vec_df$NMDS1 <- vec_df$NMDS1 * arrow_scale
+  vec_df$NMDS2 <- vec_df$NMDS2 * arrow_scale
+  vec_df$om_scenario <- om$name
 
-nmds_df$om_scenario <- factor(nmds_df$om_scenario,
-                              levels = c("Baseline", "Regime", "Crash"))
+  df <- data.frame(NMDS1 = nmds$points[,1], NMDS2 = nmds$points[,2],
+                   perf, om_scenario = om$name)
+  dists <- sqrt(df$NMDS1^2 + df$NMDS2^2)
+  df$label <- ifelse(dists > quantile(dists, 0.90), df$scenario_id, NA)
+
+  list(points = df, vectors = vec_df)
+})
+
+nmds_df <- do.call(rbind, lapply(results_list, `[[`, "points"))
+vec_df  <- do.call(rbind, lapply(results_list, `[[`, "vectors"))
+
+nmds_df$om_scenario <- factor(nmds_df$om_scenario, levels = c("Baseline", "Regime", "Crash"))
+vec_df$om_scenario  <- factor(vec_df$om_scenario, levels = c("Baseline", "Regime", "Crash"))
+
 nmds_df$brp_type  <- factor(nmds_df$brp_type, levels = c("none", "threshold"),
                             labels = c("Constant F", "Threshold HCR"))
 nmds_df$dyn_b0    <- factor(nmds_df$dyn_b0, levels = c(FALSE, TRUE),
                             labels = c("Static B0", "Dynamic B0"))
 nmds_df$stability <- factor(nmds_df$stability,
-                            levels = c("none", "symmetric", "asymmetric"),
-                            labels = c("No Constraint", "Symmetric", "Asymmetric"))
+                            levels = c("none", "symmetric", "asymmetric", 'oneway'),
+                            labels = c("No Constraint", "Symmetric", "Asymmetric", "OneWay"))
 
-# Envfit vectors
-ef <- envfit(nmds, perf_scaled, permutations = 999)
-vec_df <- as.data.frame(ef$vectors$arrows * sqrt(ef$vectors$r))
-vec_df$label <- rownames(vec_df)
-arrow_scale <- 0.6 * max(abs(nmds_df[, 1:2]))
-vec_df$NMDS1 <- vec_df$NMDS1 * arrow_scale
-vec_df$NMDS2 <- vec_df$NMDS2 * arrow_scale
+pos <- position_jitter(width = 0.15, height = 0.15, seed = 42)
+library(dplyr)
 
-# Outlier labels
-dists <- sqrt(nmds_df$NMDS1^2 + nmds_df$NMDS2^2)
-nmds_df$label <- ifelse(dists > quantile(dists, 0.90),
-                        nmds_df$scenario_id, NA)
+hull_df <- nmds_df %>%
+  group_by(om_scenario, alpha) %>%
+  slice(chull(NMDS1, NMDS2))
+
+pos <- position_jitter(width = 0.15, height = 0.15, seed = 42)
 
 ggplot(nmds_df, aes(x = NMDS1, y = NMDS2)) +
-  geom_point(aes(colour = brp_type, shape = dyn_b0, size = spr_x),
-             alpha = 0.8) +
+  # geom_polygon(data = hull_df, aes(linetype = factor(alpha), group = alpha),
+               # fill = NA, colour = "grey50", linewidth = 0.85) +
+  geom_point(aes(colour = stability, shape = dyn_b0, size = spr_x),
+             alpha = 0.5, position = pos) +
   geom_text(aes(label = label), size = 2.5, vjust = -1, colour = "grey30",
-            na.rm = TRUE) +
+            na.rm = TRUE, position = pos) +
   geom_segment(data = vec_df,
                aes(x = 0, y = 0, xend = NMDS1, yend = NMDS2),
                arrow = arrow(length = unit(0.2, "cm")),
-               colour = "grey40", linewidth = 0.5,
-               inherit.aes = FALSE) +
-  geom_text(data = vec_df,
-            aes(x = NMDS1 * 1.12, y = NMDS2 * 1.12, label = label),
-            size = 3, colour = "grey30", fontface = "italic",
-            inherit.aes = FALSE) +
-  ggh4x::facet_grid2(om_scenario ~ stability, scales = 'free', independent = 'y') +
-  scale_colour_manual(values = c("Constant F" = "steelblue",
-                                 "Threshold HCR" = "firebrick")) +
+               colour = "grey40", linewidth = 0.5, inherit.aes = FALSE) +
+  ggrepel::geom_label_repel(data = vec_df,
+                            aes(x = NMDS1, y = NMDS2, label = label),
+                            size = 3, colour = "grey30", fontface = "italic",
+                            fill = "white", label.size = 0.2,
+                            nudge_x = vec_df$NMDS1 * 0.3,
+                            nudge_y = vec_df$NMDS2 * 0.3,
+                            segment.color = "grey70", segment.size = 0.3,
+                            box.padding = 0.4, point.padding = 0.2,
+                            min.segment.length = 0, inherit.aes = FALSE) +
+  facet_wrap(~ om_scenario) +
   scale_shape_manual(values = c("Static B0" = 16, "Dynamic B0" = 17)) +
   scale_size_continuous(range = c(1.5, 5), breaks = c(0.3, 0.5, 0.7)) +
-  labs(colour = "BRP Type", shape = "Reference Point",
-       size = expression(SPR[x])) +
-  theme_bw(base_size = 14)
-  # coord_equal()
+  scale_linetype_discrete() +
+  labs(colour = "Stability Type", shape = "Reference Point",
+       size = expression(SPR[x]), linetype = expression(alpha)) +
+  theme_bw(base_size = 14) +
+  coord_cartesian(ylim = c(-7.5, 7.5), xlim = c(-7.5, 7.5))

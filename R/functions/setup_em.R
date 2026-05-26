@@ -67,7 +67,7 @@ setup_em <- function(sim_env, y, sim) {
     dmr_mean_spec = 'fix',
     # Fixing sigma C and F
     ln_sigmaC = sim_data$ln_sigmaC,
-    ln_sigmaF = array(log(0.5), dim = c(input_list$data$n_regions, input_list$data$n_seas, input_list$data$n_fish_fleets)),
+    ln_sigmaF = array(log(1), dim = c(input_list$data$n_regions, input_list$data$n_seas, input_list$data$n_fish_fleets)),
     logit_dmr_mean = array(qlogis(0.16), dim = c(input_list$data$n_regions,
                                                  input_list$data$n_seas, input_list$data$n_fish_fleets)) # fixing dmr at 0.16
   )
@@ -127,7 +127,7 @@ setup_em <- function(sim_env, y, sim) {
     input_list = input_list,
     # Model options
     Use_fish_selex_prior = 1,
-    fish_selex_prior = expand.grid(region = 1, par = 1:2, block = 1:3, sex = 1:2, fleet = 1, mu = 2, sd = 1),
+    fish_selex_prior = expand.grid(region = 1, par = 1:2, block = 1:3, sex = 1:2, fleet = 1, mu = 2, sd = 2),
     fish_sel_model = c("logist1_Fleet_1"), # fishery selex model
     fish_fixed_sel_pars_spec = c("est_all"), # whether to estiamte all fixed effects for fishery selectivity
     fish_sel_blocks = c(
@@ -151,7 +151,7 @@ setup_em <- function(sim_env, y, sim) {
 
     # Model options
     Use_srv_selex_prior = 1, # selex priors
-    srv_selex_prior = expand.grid(region = 1, par = 1:2, block = 1, sex = 1:2, fleet = 1, mu = 2, sd = 1),
+    srv_selex_prior = expand.grid(region = 1, par = 1:2, block = 1, sex = 1:2, fleet = 1, mu = 2, sd = 2),
     srv_sel_model = c("logist1_Fleet_1"), # survey selectivity form
     srv_fixed_sel_pars_spec = c("est_all"), # whether to estimate all fixed effects for survey selectivity
     srv_q_spec = c("est_all")  # whether to estiamte all fixed effects for survey catchability
@@ -179,6 +179,23 @@ setup_em <- function(sim_env, y, sim) {
   # Starting values for selectivity parameters
   input_list$par$fish_fixed_sel_pars[] <- log(c(c(4.82, 0.49, 4.34, 1.76, 4.86, 2.48, 8.27, 0.49, 5.49, 0.90, 6.84, 0.48))) # starting values for fishery
   input_list$par$srv_fixed_sel_pars[] <- log(c(5.51, 1.349, 7.52, 0.551)) # starting values
+
+  # Starting values for catchability
+  input_list$par$ln_srv_q[] <- -18
+  input_list$par$ln_fish_q[] <- -18
+
+  # Data Stuff
+  # Set 0 for historical periods
+  input_list$data$UseFishIdx[,1:4,,] <- 0
+  input_list$data$UseFishAgeComps[,1:26,,] <- 0
+  input_list$data$UseSrvAgeComps[,1:21,,] <- input_list$data$UseSrvIdx[,1:21,,] <- 0
+
+  # If fishery catches are 0, don't use fishery age comps and indices
+  zero_catch <- apply(sim_data$ObsCatch, 2, function(x) all(x == 0))  # logical vector over years
+  if(any(zero_catch)) {
+    input_list$data$UseFishAgeComps[, zero_catch, , ] <- 0
+    input_list$data$UseFishIdx[, zero_catch, , ] <- 0
+  }
 
   return(input_list)
 }

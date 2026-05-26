@@ -16,7 +16,7 @@ data <- readRDS(here("inputs", 'sablefish_data_19May2026.RDS'))
 
 ### OM Dimensions -----------------------------------------------------------
 set.seed(123)
-n_sims <- 1
+n_sims <- 150
 n_yrs <- length(rep$Fmort)
 closed_loop_yrs <- 60
 n_ages <- 30
@@ -78,7 +78,7 @@ fish_q_input[,21:47,,] <- exp(out$rep$par.fixed[names(out$rep$par.fixed) == 'fsh
 fish_q_input[,-c(1:47),,] <- exp(out$rep$par.fixed[names(out$rep$par.fixed) == 'fsh_logq'][3])
 
 # Fill in fishery observation error (using the mean)
-ObsFishIdx_SE <- array(mean(data$sigma_fsh_cpue),  dim = c(n_regions, n_yrs + closed_loop_yrs, n_seas, n_fish_fleets))
+ObsFishIdx_SE <- array(mean(data$sigma_fsh_cpue) * 4,  dim = c(n_regions, n_yrs + closed_loop_yrs, n_seas, n_fish_fleets))
 
 # Fill in ISS for fishery ages (using the mean)
 ISS_FishAgeComps <- array(round(mean(data$effn_fsh_age)), dim = c(n_regions, n_yrs  + closed_loop_yrs, n_seas, n_sexes, n_fish_fleets, n_sims))
@@ -123,7 +123,7 @@ srv_q_input[,-c(1:42),,] <- exp(out$rep$par.fixed[names(out$rep$par.fixed) == 's
 srv_q_input[] <- exp(out$rep$par.fixed[names(out$rep$par.fixed) == 'srv_logq'][2])
 
 # Fill in survey observation error (using the mean)
-ObsSrvIdx_SE <- array(mean(data$sigma_srv_cpue),  dim = c(n_regions, n_yrs  + closed_loop_yrs, n_seas, n_srv_fleets))
+ObsSrvIdx_SE <- array(mean(data$sigma_srv_cpue) * 5,  dim = c(n_regions, n_yrs  + closed_loop_yrs, n_seas, n_srv_fleets))
 
 # Fill in ISS for survey ages (using the mean)
 ISS_SrvAgeComps <- array(round(mean(data$effn_srv_age)), dim = c(n_regions, n_yrs  + closed_loop_yrs, n_seas, n_sexes, n_srv_fleets, n_sims))
@@ -210,7 +210,7 @@ sim_list <- Setup_Sim_Rec(
     tmp
   },
   sexratio_input = array(0.5, dim = c(n_pop, n_regions, n_yrs + closed_loop_yrs, n_sexes, n_sims)),
-  ln_sigmaR = array(log(0), dim = c(2, n_pop, n_regions)),
+  ln_sigmaR = array(log(1), dim = c(2, n_pop, n_regions)),
   Rec_input = {
     tmp <- array(NA, dim = c(n_pop, n_regions, n_yrs, n_sims))
     for(i in 1:n_sims) tmp[1,1,,i] <- rep$pred_rec
@@ -274,7 +274,7 @@ sim_list <- Setup_Sim_Rec(
   # Steepness
   h_input = array(0.8, dim = c(n_pop, n_regions, n_yrs + closed_loop_yrs, n_sims)),
   sexratio_input = array(0.5, dim = c(n_pop, n_regions, n_yrs + closed_loop_yrs, n_sexes, n_sims)),
-  ln_sigmaR = array(log(0), dim = c(2, n_pop, n_regions)),
+  ln_sigmaR = array(log(1), dim = c(2, n_pop, n_regions)),
   Rec_input = {
     tmp <- array(NA, dim = c(n_pop, n_regions, n_yrs, n_sims))
     for(i in 1:n_sims) tmp[1,1,,i] <- rep$pred_rec
@@ -319,7 +319,7 @@ sim_list <- Setup_Sim_Rec(
   # Steepness
   h_input = array(0.8, dim = c(n_pop, n_regions, n_yrs + closed_loop_yrs, n_sims)),
   sexratio_input = array(0.5, dim = c(n_pop, n_regions, n_yrs + closed_loop_yrs, n_sexes, n_sims)),
-  ln_sigmaR = array(log(0), dim = c(2, n_pop, n_regions)),
+  ln_sigmaR = array(log(1), dim = c(2, n_pop, n_regions)),
   Rec_input = {
     tmp <- array(NA, dim = c(n_pop, n_regions, n_yrs, n_sims))
     for(i in 1:n_sims) tmp[1,1,,i] <- rep$pred_rec
