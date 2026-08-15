@@ -4,6 +4,7 @@ library(tidyverse)
 library(mgcv)
 
 data <- readRDS(here("inputs", 'sablefish_data_19May2026.RDS'))
+rep <- readRDS(here("inputs",  "actual_report.rds"))
 
 # Grade-specific nominal prices from Stephen Rhoads
 grade_nominal <- tribble(
@@ -78,10 +79,14 @@ ggplot(pop_dat, aes(x = tot_biom, y = rel_price_inf_adj, label = year )) +
   geom_smooth() +
   labs(x = 'Total Biomass', y = 'Relative Price Adjusted by Inflation')
 
-ggplot(pop_dat, aes(x = n, y = rel_price_inf_adj, label = year )) +
-  geom_text() +
-  geom_smooth() +
-  labs(x = 'Total N', y = 'Relative Price Adjusted by Inflation')
+ggsave(
+  here('figs', 'price_relationship.png'),
+  ggplot(pop_dat, aes(x = n, y = rel_price_inf_adj, label = year )) +
+    geom_text() +
+    geom_smooth() +
+    labs(x = 'Total N', y = 'Relative Price Adjusted by Inflation'),
+  height = 7, width = 8, dpi = 300)
+)
 
 # Fit model
 pop_dat$rel_price_inf_adj[pop_dat$rel_price_inf_adj == 1] <- 0.99

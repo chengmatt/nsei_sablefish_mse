@@ -251,9 +251,9 @@ sim_list <- Setup_Sim_Rec(
     # Baseline
     tmp[,,1:n_yrs,] <- exp(log_rbar)
     tmp[,,1,] <- exp(log_rinit)
-    # Cycling regimes in projection period: 15 yr crash, 15 yr increase, repeat
+    # Cycling regimes in projection period: 15 yr mean, 5 yr increase, repeat
     crash_start <- 52
-    cycle_length <- 30  # 15 low + 15 high
+    cycle_length <- 20  # 15 low + 5 high
     proj_yrs <- (n_yrs + 1):(n_yrs + closed_loop_yrs)
     for (yr in proj_yrs) {
       if (yr < crash_start) {
@@ -303,15 +303,15 @@ sim_list <- Setup_Sim_Rec(
     # Baseline
     tmp[,,1:n_yrs,] <- exp(log_rbar)
     tmp[,,1,] <- exp(log_rinit)
-    # Crash for first 30 projection years, then recover
-    crash_start <- n_yrs + 1
-    crash_end <- n_yrs + 30
+    # baseline for first 15 projection years, then crash for 10 years, and rebound back to equilibrium
+    crash_start <- n_yrs + 15
+    crash_end <- n_yrs + 25
     proj_yrs <- (n_yrs + 1):(n_yrs + closed_loop_yrs)
     for (yr in proj_yrs) {
       if (yr >= crash_start & yr <= crash_end) {
         tmp[,,yr,] <- exp(log_rbar) * 0.1
       } else {
-        tmp[,,yr,] <- exp(log_rbar) * 3
+        tmp[,,yr,] <- exp(log_rbar)
       }
     }
     tmp
