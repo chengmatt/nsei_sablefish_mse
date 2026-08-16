@@ -425,7 +425,8 @@ grid_plot <- function(metric, stability) {
     p <- ggplot(d, aes(x = spr_x, y = alpha, z = med)) +
       geom_tile(aes(fill = med)) +
       geomtextpath::geom_textcontour(color = 'white', size = 5, linewidth = 1) +
-      scale_fill_viridis_c() +
+      # Catch AAV: lower is better, so reverse the scale (yellow = low)
+      scale_fill_viridis_c(direction = if (metric == "Catch AAV") -1 else 1) +
       scale_x_continuous(breaks = seq(0.3, 0.7, 0.1), expand = c(0, 0)) +
       scale_y_continuous(breaks = seq(0, 0.5, 0.1), expand = c(0, 0)) +
       facet_wrap(~om_scenario) + # single facet, kept for the strip label
