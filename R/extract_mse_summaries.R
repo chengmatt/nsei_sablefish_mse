@@ -1,11 +1,11 @@
-# Purpose: Distill the raw MSE result files (assessment and no-assessment) into a
+# Purpose: Condense the raw MSE result files (assessment and no-assessment) into a
 #          compact cache used by the plotting scripts. The no-assessment files are
 #          ~7 GB each, so they are read one at a time and dropped before the next.
 # Creator: Matthew LH. Cheng
 
 library(here)
-
 term_cond_yr <- 2026  # terminal conditioning (assessment) year
+RETRO_LAG    <- 10    # peels retained per assessment for retrospective diagnostics
 
 # HCRs shared by both run sets. The assessment run uses a reduced grid
 # (spr_x in {0.4, 0.5}, alpha in {0, 0.25, 0.5}, asymmetric only), so this is the
@@ -67,6 +67,27 @@ summarize_hcr <- function(s, fb, mode) {
     })
     out$pdHess <- rep_mat(res, function(x) x$pdHess)
     out$grad   <- rep_mat(res, function(x) x$grad)
+
+    # Retrospective structure. Each closed-loop assessment is a peel relative to
+    # every later one, so keep each assessment's estimate of its own terminal
+    # year and of the RETRO_LAG years before it -- enough to form Mohn's rho at
+    # any reference year without carrying the full estimated series.
+    # ssb_em_tail[assessment, lag + 1, replicate] = the SSB that the assessment
+    # run in year y reported for year y - lag.
+    n_asmt <- length(res[[1]]$ssb_em)
+    out$ssb_em_tail <- array(NA_real_, c(n_asmt, RETRO_LAG + 1, length(res)))
+    for (j in seq_along(res)) {
+      em <- res[[j]]$ssb_em
+      for (i in seq_len(n_asmt)) {
+        v <- em[[i]]
+        if (is.null(v)) next
+        idx <- length(v) - (0:RETRO_LAG)
+        ok  <- idx >= 1
+        out$ssb_em_tail[i, ok, j] <- v[idx[ok]]
+      }
+    }
+    # full estimated series for one replicate, for the retrospective fan plot
+    out$ssb_em_example <- res[[1]]$ssb_em
   }
   out
 }
@@ -145,6 +166,7 @@ for (om_name in names(res_files)) {
   }
 }
 
-cache$meta <- list(term_cond_yr = term_cond_yr, hcr_set = hcr_set)
+cache$meta <- list(term_cond_yr = term_cond_yr, hcr_set = hcr_set,
+                   retro_lag = RETRO_LAG)
 saveRDS(cache, here("outputs", "mse_summaries.RDS"))
 cat("\nwrote outputs/mse_summaries.RDS\n")

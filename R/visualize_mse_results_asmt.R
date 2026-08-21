@@ -81,7 +81,7 @@ p_re <- ggplot(re_df %>% filter(!is.na(med)), aes(year, med, colour = hcr)) +
   geom_hline(yintercept = 0, linetype = 2, colour = "grey40") +
   geom_ribbon(data = re_df %>% filter(!is.na(med), hcr == ref_hcr),
               aes(ymin = lwr, ymax = upr, fill = hcr), colour = NA, alpha = 0.20) +
-  geom_line(linewidth = 0.9) +
+  geom_line(linewidth = 1.3) +
   facet_wrap(~ om_scenario) +
   scale_colour_manual(values = hcr_pal) +
   scale_fill_manual(values = hcr_fill) +
@@ -150,3 +150,54 @@ save_fig("em_convergence", patchwork::wrap_plots(p_pd, p_gr, ncol = 1), W2, 11)
 cat(sprintf("\nassessment convergence: %.3f%% of fits positive-definite; worst gradient %.3g\n",
             100 * mean(conv_df$pd_rate), max(conv_df$max_grad)))
 cat("wrote figs/", PREF, "*.png\n", sep = "")
+
+# Retrospective Bias ------------------------------------------------------
+
+# Every closed-loop assessment is a peel of every later one, so the retrospective
+# pattern is visible exactly as it would be in practice -- without reference to
+# the operating model. This is the complement to the relative-error figure
+# above, which compares the assessment against the truth it could not see.
+# Retrospective fan for a single replicate, one panel per management procedure:
+# each line is one assessment's view of history, drawn over the projection
+# period, against the operating model
+fan_df <- do.call(rbind, lapply(om_levels, function(om)
+  do.call(rbind, lapply(hcr_levels, function(h) {
+    ex <- rec_of(om, MODE)[[h]]$ssb_em_example
+    fb <- fb_of(om, MODE)
+    keep <- seq(1, length(ex), by = 6)          # every 6th assessment
+    do.call(rbind, lapply(keep, function(i) {
+      v <- ex[[i]]
+      if (is.null(v)) return(NULL)
+      t <- seq_along(v)
+      data.frame(om_scenario = om, hcr = h,
+                 asmt_year = term_cond_yr - (fb - 1) + (fb + i - 1),
+                 year = term_cond_yr - (fb - 1) + t, ssb = v / 1e5)[t >= fb, ]
+    }))
+  }))))
+fan_df$om_scenario <- factor(fan_df$om_scenario, levels = om_levels)
+fan_df$hcr         <- factor(fan_df$hcr, levels = hcr_levels)
+
+truth_df <- do.call(rbind, lapply(om_levels, function(om)
+  do.call(rbind, lapply(hcr_levels, function(h) {
+    r  <- rec_of(om, MODE)[[h]]
+    fb <- fb_of(om, MODE)
+    data.frame(om_scenario = om, hcr = h, year = years_of(om, MODE),
+               ssb = r$SSB[, 1] / 1e5)[fb:nrow(r$SSB), ]
+  }))))
+truth_df$om_scenario <- factor(truth_df$om_scenario, levels = om_levels)
+truth_df$hcr         <- factor(truth_df$hcr, levels = hcr_levels)
+
+p_fan <- ggplot(fan_df, aes(year, ssb, group = asmt_year, colour = asmt_year)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(data = fan_df %>% group_by(om_scenario, hcr, asmt_year) %>%
+               slice_max(year, n = 1) %>% ungroup(), size = 3.2) +
+  geom_line(data = truth_df, aes(year, ssb), inherit.aes = FALSE,
+            colour = "black", linewidth = 1.5) +
+  facet_grid(hcr ~ om_scenario, scales = "free_y") +
+  scale_colour_viridis_c(option = "viridis") +
+  labs(x = "Year", y = "SSB", colour = "Assessment year") +
+  theme_bw(base_size = 20) +
+  theme(legend.position = "top",
+        legend.key.width = grid::unit(3, "cm"))
+
+save_fig("retro_fan", p_fan, 15, 22)
