@@ -9,15 +9,16 @@ library(dplyr)
 price_mod <- readRDS(here("outputs", 'price_model.RDS'))
 grade_df <- read.csv(here("outputs", 'rel_grade_price.csv'))
 
+# no-assessment (perfect information) runs -- these files are ~7 GB each
 om_scenarios <- list(
   list(name = "Baseline",
-       results = readRDS(here('scratch', 'base_results.RDS')),
+       results = readRDS(here('outputs', 'base_results_noasmt.RDS')),
        sim_list = readRDS(here("outputs", 'base_mse_om.RDS'))),
   list(name = "Regime",
-       results = readRDS(here('scratch', 'regime_results.RDS')),
+       results = readRDS(here('outputs', 'regime_results_noasmt.RDS')),
        sim_list = readRDS(here("outputs", 'bh_regime_mse_om.RDS'))),
   list(name = "Crash",
-       results = readRDS(here('scratch', 'crash_results.RDS')),
+       results = readRDS(here('outputs', 'crash_results_noasmt.RDS')),
        sim_list = readRDS(here("outputs", 'bh_crash_mse_om.RDS')))
 )
 

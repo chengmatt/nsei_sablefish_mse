@@ -1,4 +1,4 @@
-# Purpose: To setup MSE skeleton and validate MSE
+# Purpose: To setup MSE skeleton and run MSE w/o an assessment
 # Creator: Matthew LH. Cheng
 # Date: 5/20/26
 
@@ -85,7 +85,7 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
     n_avg_yrs    = 1,
     SPR_x        = spr_x,
     calc_rec_st_yr = 1,
-    rec_age      = 0,
+    rec_age      = 2,
     type         = "single_region",
     what         = "SPR"
   )
@@ -133,7 +133,7 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
 
           obj <- fit_model(
             asmt_data, tmp_list$par, tmp_list$map, NULL,
-            newton_loops = 0, silent = TRUE
+            newton_loops = 1, silent = TRUE
           )
           sd_rep <- sdreport(obj)
 
@@ -152,7 +152,7 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
       }
 
       # Get Reference Points
-      # closure years (F = 0) need patched F values: the ref-point optimizer needs a
+      # closure years (F = 0) need patched F values, where the ref-point optimizer needs a
       # nonzero F pattern (input 1), and the advice projection needs a nonzero F for
       # its fleet split but should treat the closed current year as ~unfished
       # (input 1e-4; input 1 would crash the projected stock and delay reopening).
@@ -282,7 +282,7 @@ for (sc in seq_len(nrow(scenario_grid))) {
 plan(sequential)
 
 # Save
-saveRDS(all_results, here("scratch", "base_results.RDS"))
+saveRDS(all_results, here("outputs", "base_results_noasmt.RDS"))
 
 # Run Regime MSE -----------------------------------------------------------------
 options(future.globals.maxSize = 5 * 1024^3)
@@ -325,7 +325,7 @@ for (sc in seq_len(nrow(scenario_grid))) {
 plan(sequential)
 
 # Save
-saveRDS(all_results, here("scratch", "regime_results.RDS"))
+saveRDS(all_results, here("outputs", "regime_results_noasmt.RDS"))
 
 # Run Crash MSE -----------------------------------------------------------------
 options(future.globals.maxSize = 5 * 1024^3)
@@ -368,5 +368,5 @@ for (sc in seq_len(nrow(scenario_grid))) {
 plan(sequential)
 
 # Save
-saveRDS(all_results, here("scratch", "crash_results.RDS"))
+saveRDS(all_results, here("outputs", "crash_results_noasmt.RDS"))
 
