@@ -4,21 +4,16 @@
 
 catch_to_f <- function(catch, sim_env, y, sim) {
 
-  # get F
-  tmp_f <- catch_to_F_singlefleet(
-    f_guess = 0.05, # guess for fishing mortality rate
-    catch = catch, # catch values to use
-    NAA = sim_env$NAA[1, 1, y+1,,, , sim], # numbers at age in simulation (truth)
-    WAA = sim_env$WAA_fish[1, 1, y+1,, , , 1, sim], # weight-at-age in simulation (truth)
-    natmort  = sim_env$natmort[1, 1, y+1, , , sim], # natural mortality in simulation (truth)
-    fish_sel = sim_env$fish_sel[1,1, y+1,1, , , 1, sim], # fishery selectivity in simulation (truth)
-    dmr = sim_env$dmr[1,y+1,1,1,sim], # dmr rate in simulation (truth)
-    ret_sel = sim_env$ret_sel[1,1, y+1,1, , , 1, sim], # retention selectivity in simulation (truth)
-    n.iter = 30
+  # get F that takes this catch (biomass) from the simulation (truth), with its retention and discard mortality
+  F_solve <- catch_to_F_om(
+    target = catch, # catch for the one region, season and fleet
+    y = y + 1, # year being fished
+    sim = sim, # simulation replicate
+    sim_env = sim_env # simulation environment (truth)
   )
 
   # input F into simulation environment
-  sim_env$Fmort[,y+1,,,sim] <- array(tmp_f, dim = c(sim_env$n_regions, sim_env$n_seas, sim_env$n_fish_fleets)) # assign bisection values back into simulation
+  sim_env$Fmort[,y+1,,,sim] <- F_solve$Fmort # assign solved F back into simulation
 }
 
 get_proj_catch <- function(obj, asmt_data, proj_opt, reference_points, sim_env, y, sim, use_true_values,
