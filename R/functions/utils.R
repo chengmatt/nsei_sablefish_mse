@@ -30,7 +30,7 @@ get_proj_catch <- function(obj, asmt_data, proj_opt, reference_points, sim_env, 
     tmp_ret_sel <- array(rep(sim_env$ret_sel[,,y,,,,,sim], each = proj_opt$n_proj_yrs), dim = c(sim_env$n_pop, sim_env$n_regions, proj_opt$n_proj_yrs, sim_env$n_seas, sim_env$n_ages, sim_env$n_sexes, sim_env$n_fish_fleets)) # retained selectivity
     tmp_terminal_F <- array(sim_env$Fmort[,y,,,sim], dim = c(sim_env$n_regions, sim_env$n_seas, sim_env$n_fish_fleets)) # terminal fishing mortality
     tmp_terminal_dmr <- array(sim_env$dmr[,y,,,sim], dim = c(sim_env$n_regions, sim_env$n_seas, sim_env$n_fish_fleets)) # terminal discard mortality rate
-    tmp_natmort <- array(rep(sim_env$natmort[,,y,,,sim], each = proj_opt$n_proj_yrs), dim = c(sim_env$n_pop, sim_env$n_regions, proj_opt$n_proj_yrs, sim_env$n_ages, sim_env$n_sexes)) # natural mortality
+    tmp_natmort <- array(rep(sim_env$natmort[,,y,,,,sim], each = proj_opt$n_proj_yrs), dim = c(sim_env$n_pop, sim_env$n_regions, proj_opt$n_proj_yrs, sim_env$n_seas, sim_env$n_ages, sim_env$n_sexes)) # natural mortality, a rate per year in each season
     tmp_recruitment <- array(sim_env$Rec[,,1:y,sim], dim = c(sim_env$n_pop, sim_env$n_regions, length(1:y))) # recruitment to use for projections
     tmp_sexratio <- array(replicate(n = proj_opt$n_proj_yrs, sim_env$sexratio[,,y,,sim]), dim = c(sim_env$n_pop, sim_env$n_regions, proj_opt$n_proj_yrs, sim_env$n_sexes)) # recruitment sex ratio
     tmp_Movement <- array(dim = c(sim_env$n_pop, sim_env$n_regions, sim_env$n_regions, proj_opt$n_proj_yrs,sim_env$n_seas, sim_env$n_ages, sim_env$n_sexes))
@@ -49,7 +49,7 @@ get_proj_catch <- function(obj, asmt_data, proj_opt, reference_points, sim_env, 
     tmp_ret_sel <- array(rep(obj$rep$ret_sel[,,y,,,,], each = proj_opt$n_proj_yrs), dim = c(asmt_data$n_pop, asmt_data$n_regions, proj_opt$n_proj_yrs, asmt_data$n_seas, length(asmt_data$ages), asmt_data$n_sexes, asmt_data$n_fish_fleets)) # retained selectivity
     tmp_terminal_F <- array(obj$rep$Fmort[,y,,], dim = c(asmt_data$n_regions, asmt_data$n_seas, asmt_data$n_fish_fleets)) # terminal fishing mortality
     tmp_terminal_dmr <- array(obj$rep$dmr[,y,,], dim = c(asmt_data$n_regions, asmt_data$n_seas, asmt_data$n_fish_fleets)) # terminal discard mortality rate
-    tmp_natmort <- array(rep(obj$rep$natmort[,,y,,], each = proj_opt$n_proj_yrs), dim = c(asmt_data$n_pop, asmt_data$n_regions, proj_opt$n_proj_yrs, length(asmt_data$ages), asmt_data$n_sexes)) # natural mortality
+    tmp_natmort <- array(rep(obj$rep$natmort[,,y,,,], each = proj_opt$n_proj_yrs), dim = c(asmt_data$n_pop, asmt_data$n_regions, proj_opt$n_proj_yrs, asmt_data$n_seas, length(asmt_data$ages), asmt_data$n_sexes)) # natural mortality, a rate per year in each season
     tmp_recruitment <- array(obj$rep$Rec[,,1:y], dim = c(asmt_data$n_pop, asmt_data$n_regions, length(1:y))) # recruitment to use for projections
     tmp_sexratio <- array(replicate(n = proj_opt$n_proj_yrs, obj$rep$sexratio[,,y,]), dim = c(asmt_data$n_pop, asmt_data$n_regions, proj_opt$n_proj_yrs, asmt_data$n_sexes)) # recruitment sex ratio
     tmp_Movement <- array(dim = c(asmt_data$n_pop, asmt_data$n_regions, asmt_data$n_regions, proj_opt$n_proj_yrs,asmt_data$n_seas, length(asmt_data$ages), asmt_data$n_sexes))

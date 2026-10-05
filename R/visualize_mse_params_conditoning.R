@@ -38,7 +38,7 @@ demo_df <- bind_rows(
   # natural mortality
   expand_grid(sex = 1:2, age = ages) %>%
     mutate(source = "Population",
-           value = map2_dbl(age, sex, \(a, s) sim_list$natmort[1, 1, 1, a - 1, s, 1]),
+           value = map2_dbl(age, sex, \(a, s) sim_list$natmort[1, 1, 1, 1, a - 1, s, 1]), # season 1
            quantity = "Natural mortality")
 ) %>%
   mutate(sex = factor(sex_levels[sex], levels = sex_levels),
