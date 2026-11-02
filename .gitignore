@@ -2,4 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+.DS_Store
 *.RDS
+src/*.o
+src/*.so

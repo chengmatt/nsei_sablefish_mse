@@ -1,268 +1,188 @@
-# Purpose: Shared helpers for plotting MSE results out of outputs/mse_summaries.RDS
-#          (built by R/extract_mse_summaries.R). Keeps the assessment-run and
-#          assessment-vs-perfect-information scripts working off one definition
-#          of the metrics, year mapping and palettes.
-# Creator: Matthew LH. Cheng
+# Shared helpers for make_figures.R
+#
+# outputs/mse_summaries.RDS holds one entry per OM scenario and mode, each with
+# one record per harvest control rule. Inside a record every quantity is a
+# matrix with rows = model year and cols = replicate. The conditioning period
+# runs from 1975 to the terminal conditioning year; from then on the rule is in
+# control, and the quantities the rule produced (bx, ssb_em_term) have rows for
+# those projection years only.
 
 library(here)
 library(ggplot2)
 library(dplyr)
 
-cache <- readRDS(here("outputs", "mse_summaries.RDS"))
+mse_summaries <- readRDS(here("outputs", "mse_summaries.RDS"))
 
-term_cond_yr <- cache$meta$term_cond_yr   # terminal conditioning (assessment) year
-hcr_levels   <- names(cache$meta$hcr_set) # reference rule (constant F50) first
-om_levels    <- c("Baseline", "Regime", "Crash")
-ref_hcr      <- hcr_levels[1]
+terminal_conditioning_year <- mse_summaries$meta$term_cond_yr  # also the first assessment year
+hcr_names         <- names(mse_summaries$meta$hcr_set)         # reference rule (constant F50) first
+om_scenario_names <- c("Baseline", "Regime", "Crash")
+reference_hcr     <- hcr_names[1]
 
-# mode = information available to the harvest control rule
+# mode = the information the harvest control rule had to work with
 mode_labels <- c(noasmt = "Perfect information", asmt = "With assessment")
-mode_levels <- unname(mode_labels)
 
-# palettes: the reference rule is drawn in black with a grey interval; the other
-# six rules take the colourblind-safe palette (black and orange dropped)
-hcr_pal  <- c("black",  ggthemes::colorblind_pal()(8)[-c(1, 2)])
-hcr_fill <- c("grey50", ggthemes::colorblind_pal()(8)[-c(1, 2)])
-mode_pal <- setNames(c("#0072B2", "#D55E00"), mode_levels)
+# metrics that only exist once the rule is in control
+projection_only_metrics <- c("status", "status_perceived", "ssb_re")
 
-rec_of  <- function(om, mode) cache[[paste(om, mode, sep = "_")]]$hcrs
-fb_of   <- function(om, mode) cache[[paste(om, mode, sep = "_")]]$fb
-# calendar years for the full (conditioning + projection) series
-years_of <- function(om, mode) {
-  fb <- fb_of(om, mode); n_yr <- nrow(rec_of(om, mode)[[1]]$SSB)
-  (term_cond_yr - (fb - 1) + 1):(term_cond_yr - (fb - 1) + n_yr)
-}
-proj_start_yr <- function(om, mode) term_cond_yr + 1
+# the reference rule is drawn in black with a grey interval; the other six rules
+# take the colourblind-safe palette (black and orange dropped)
+hcr_colours      <- c("black",  ggthemes::colorblind_pal()(8)[-c(1, 2)])
+hcr_fill_colours <- c("grey50", ggthemes::colorblind_pal()(8)[-c(1, 2)])
+mode_colours     <- setNames(c("#0072B2", "#D55E00"), unname(mode_labels))
 
-# Replicate matrix (rows = year, cols = replicate) for a metric. Derived metrics
-# only exist over the projection period and are padded with NA so every matrix
-# shares the same year rows.
-#   status           true SSB / the Bx the rule used that year
-#   status_perceived SSB the assessment reported / that same Bx -- what the rule saw
-#   ssb_re           relative error of the assessment's terminal SSB vs the OM
-metric_mat <- function(om, mode, hcr, metric) {
-  r  <- rec_of(om, mode)[[hcr]]
-  fb <- fb_of(om, mode)
-  n_yr <- nrow(r$SSB)
-  if (metric %in% c("SSB", "Catch", "Fmort", "Rec")) return(r[[metric]])
 
-  pad <- function(m) rbind(matrix(NA_real_, fb - 1, ncol(m)), m)
-  ssb_proj <- r$SSB[fb:n_yr, , drop = FALSE]
+# One run ------------------------------------------------------------------
 
-  switch(metric,
-    status           = pad(ssb_proj / r$bx),
-    status_perceived = pad(r$ssb_em_term / r$bx),
-    ssb_em_term      = pad(r$ssb_em_term),
-    ssb_re           = pad((r$ssb_em_term - ssb_proj) / ssb_proj),
-    stop("unknown metric: ", metric)
+# Everything one OM scenario, mode and rule needs, under plain names. The OM
+# carries biomass and catch in kg and recruitment in numbers, while every
+# figure reports tonnes and millions of fish, so convert here and nowhere else.
+get_run <- function(om_scenario, mode, hcr) {
+  scenario_entry <- mse_summaries[[paste(om_scenario, mode, sep = "_")]]
+  record <- scenario_entry$hcrs[[hcr]]
+
+  first_projection_row <- scenario_entry$fb
+  n_years <- nrow(record$SSB)
+
+  list(
+    ssb               = record$SSB   / 1e3,   # t
+    catch             = record$Catch / 1e3,   # t
+    fishing_mortality = record$Fmort,
+    recruits          = record$Rec   / 1e6,   # millions of age-2 fish
+
+    # projection years only, in the same units as ssb
+    target_ssb   = record$bx / 1e3,   # the Bx the rule aimed at that year
+    assessed_ssb = if (is.null(record$ssb_em_term)) NULL else record$ssb_em_term / 1e3,
+
+    conditioning_rows = seq_len(first_projection_row - 1),
+    projection_rows   = first_projection_row:n_years,
+
+    # row 1 is this calendar year, so the rows run 1975 ... 2085
+    years = seq(terminal_conditioning_year - first_projection_row + 1,
+                length.out = n_years)
   )
 }
 
-# median + 90% interval by year
-summarize_mat <- function(mat, yrs) {
-  q <- function(p) apply(mat, 1, function(v) {
-    v <- v[!is.na(v)]; if (!length(v)) NA_real_ else unname(quantile(v, p))
-  })
-  data.frame(year = yrs, med = q(0.5), lwr = q(0.05), upr = q(0.95))
+# Depletion threshold: 10% of each replicate's conditioning-period maximum SSB
+crash_threshold <- function(run) {
+  apply(run$ssb[run$conditioning_rows, , drop = FALSE], 2, max) * 0.1
 }
 
-# Long time-series frame across OM scenarios / modes / HCRs
-build_ts <- function(metric, scale = 1, hcrs = hcr_levels,
-                     modes = names(mode_labels), oms = om_levels) {
-  df <- do.call(rbind, lapply(oms, function(om)
-    do.call(rbind, lapply(modes, function(md)
-      do.call(rbind, lapply(hcrs, function(h) {
-        m <- metric_mat(om, md, h, metric) / scale
-        cbind(data.frame(om_scenario = om, mode = unname(mode_labels[md]), hcr = h),
-              summarize_mat(m, years_of(om, md)),
-              fb_year = proj_start_yr(om, md))
-      }))))))
-  finalize(df, hcrs, modes)
-}
 
-# Terminal projection-year replicate values (for the side density panels)
-build_term <- function(metric, scale = 1, hcrs = hcr_levels,
-                       modes = names(mode_labels), oms = om_levels) {
-  df <- do.call(rbind, lapply(oms, function(om)
-    do.call(rbind, lapply(modes, function(md)
-      do.call(rbind, lapply(hcrs, function(h) {
-        m <- metric_mat(om, md, h, metric) / scale
-        data.frame(om_scenario = om, mode = unname(mode_labels[md]), hcr = h,
-                   value = m[nrow(m), ])
-      }))))))
-  finalize(df, hcrs, modes)
-}
+# Metrics ------------------------------------------------------------------
 
-finalize <- function(df, hcrs, modes) {
-  df$om_scenario <- factor(df$om_scenario, levels = om_levels)
-  df$hcr         <- factor(df$hcr, levels = hcrs)
-  df$mode        <- factor(df$mode, levels = unname(mode_labels[modes]))
-  df
-}
+# One metric as a replicate matrix, together with the calendar year of each row.
+#   SSB, Catch, Fmort, Rec  straight out of the OM, whole series
+#   status                  true SSB / the target the rule used that year
+#   status_perceived        SSB the assessment reported / that same target
+#   ssb_re                  relative error of the assessment's terminal SSB
+get_metric <- function(run, metric) {
+  true_ssb <- run$ssb[run$projection_rows, , drop = FALSE]
 
-# Per-replicate performance metrics over the projection period ---------------
+  values <- switch(metric,
+    SSB   = run$ssb,
+    Catch = run$catch,
+    Fmort = run$fishing_mortality,
+    Rec   = run$recruits,
+    status           = true_ssb / run$target_ssb,
+    status_perceived = run$assessed_ssb / run$target_ssb,
+    ssb_re           = (run$assessed_ssb - true_ssb) / true_ssb
+  )
 
-# catch AAV: sum|dC| / sum C within a replicate
-catch_aav_reps <- function(catch_mat, proj_rows) {
-  apply(catch_mat[proj_rows, , drop = FALSE], 2, function(cc) {
-    if (sum(head(cc, -1)) == 0) return(NA_real_)
-    sum(abs(diff(cc))) / sum(head(cc, -1))
-  })
-}
-
-# One row per OM x mode x HCR. med_ssb / med_catch are medians over all
-# projection years and replicates; p_crash is the fraction of projection
-# replicate-years with SSB below 10% of that replicate's conditioning-period max.
-perf_metrics <- function(hcrs = hcr_levels, modes = names(mode_labels), oms = om_levels) {
-  df <- do.call(rbind, lapply(oms, function(om)
-    do.call(rbind, lapply(modes, function(md)
-      do.call(rbind, lapply(hcrs, function(h) {
-        r    <- rec_of(om, md)[[h]]
-        fb   <- fb_of(om, md)
-        proj <- fb:nrow(r$SSB)
-        thr  <- apply(r$SSB[seq_len(fb - 1), , drop = FALSE], 2, max) * 0.1
-        data.frame(
-          om_scenario = om, mode = unname(mode_labels[md]), hcr = h,
-          med_ssb     = median(r$SSB[proj, ])   / 1e5,
-          med_catch   = median(r$Catch[proj, ]) / 1e5,
-          catch_aav   = median(catch_aav_reps(r$Catch, proj), na.rm = TRUE),
-          p_crash     = mean(sweep(r$SSB[proj, , drop = FALSE], 2, thr, "<")),
-          p_closure   = mean(r$Catch[proj, ] == 0),
-          term_status = median(metric_mat(om, md, h, "status")[nrow(r$SSB), ], na.rm = TRUE)
-        )
-      }))))))
-  finalize(df, hcrs, modes)
-}
-
-metric_labels <- c(
-  med_ssb     = "Median SSB (100k t)",
-  med_catch   = "Median catch (100k t)",
-  catch_aav   = "Catch AAV",
-  p_crash     = "P(SSB < 10% of historical max)",
-  p_closure   = "P(fishery closure)",
-  term_status = expression(Terminal~SSB/B[x])
-)
-
-# Time-series plot ----------------------------------------------------------
-
-# colour_by: "hcr" or "mode" (or NULL for a single series). The 90% interval is
-# drawn only for the first level of the colour variable so overlapping ribbons
-# stay readable; the conditioning period is shared and drawn once in black.
-plot_ts <- function(df, ylab, colour_by = NULL, term_df = NULL, zoom = FALSE,
-                    facet = "wrap", pal = NULL, fill_pal = NULL, ribbon_all = FALSE) {
-
-  facet_vars <- c("om_scenario", if (facet == "grid") "hcr")
-
-  # the conditioning period is a single deterministic trajectory shared by every
-  # replicate, HCR and mode -- keep one copy per panel and draw it in black
-  hist_df <- df %>%
-    filter(year <= fb_year, !is.na(med)) %>%
-    distinct(across(all_of(c(facet_vars, "year"))), .keep_all = TRUE)
-  proj_df <- df %>% filter(year >= fb_year, !is.na(med))
-  if (!is.null(term_df)) term_df <- term_df %>% filter(!is.na(value))
-
-  p <- ggplot(mapping = aes(year, med))
-
-  if (!zoom && dplyr::n_distinct(hist_df$year) > 1) {
-    p <- p +
-      geom_vline(data = distinct(df, om_scenario, fb_year), aes(xintercept = fb_year),
-                 linetype = 2, colour = "grey50") +
-      geom_ribbon(data = hist_df, aes(ymin = lwr, ymax = upr), colour = NA, alpha = 0.20) +
-      geom_line(data = hist_df, linewidth = 0.9)
+  years <- if (metric %in% projection_only_metrics) {
+    run$years[run$projection_rows]
   } else {
-    p <- p + geom_vline(data = distinct(df, om_scenario, fb_year), aes(xintercept = fb_year),
-                        linetype = 2, colour = "grey50")
+    run$years
   }
+  list(values = values, years = years)
+}
 
-  if (!is.null(colour_by)) {
-    # with many overlapping series only the first level gets an interval, so the
-    # ribbons stay readable; ribbon_all is for two-way (mode) comparisons
-    base_lvl <- levels(proj_df[[colour_by]])[1]
-    ribbon_df <- if (ribbon_all) proj_df else proj_df[proj_df[[colour_by]] == base_lvl, ]
-    p <- p +
-      geom_ribbon(data = ribbon_df,
-                  aes(ymin = lwr, ymax = upr, fill = .data[[colour_by]],
-                      group = interaction(hcr, mode)),
-                  colour = NA, alpha = if (ribbon_all) 0.15 else 0.20) +
-      geom_line(data = proj_df,
-                aes(colour = .data[[colour_by]], group = interaction(hcr, mode)),
-                linewidth = 0.9)
-    if (!is.null(pal)) p <- p + scale_colour_manual(values = pal) +
-        scale_fill_manual(values = if (is.null(fill_pal)) pal else fill_pal)
-  } else {
-    p <- p +
-      geom_ribbon(data = proj_df, aes(ymin = lwr, ymax = upr), colour = NA, alpha = 0.20) +
-      geom_line(data = proj_df, linewidth = 0.9)
-  }
-
-  if (!is.null(term_df)) {
-    dens_aes <- if (is.null(colour_by)) {
-      aes(y = value, x = after_stat(scaled))
-    } else {
-      aes(y = value, x = after_stat(scaled),
-          colour = .data[[colour_by]], fill = .data[[colour_by]])
+# Median and 90% interval across replicates, one row per year. A year whose
+# replicates all failed to converge stays NA.
+summarize_replicates <- function(values, years) {
+  yearly <- data.frame(year = years, median = NA, lower = NA, upper = NA)
+  for (i in seq_len(nrow(values))) {
+    replicates <- values[i, ]
+    replicates <- replicates[!is.na(replicates)]
+    if (length(replicates) > 0) {
+      yearly[i, c("median", "lower", "upper")] <-
+        unname(quantile(replicates, c(0.5, 0.05, 0.95)))
     }
-    p <- p +
-      ggside::geom_ysidedensity(data = term_df, dens_aes, alpha = 0.20, linewidth = 0.6) +
-      ggside::scale_ysidex_continuous(breaks = NULL)
   }
-
-  p <- p +
-    (if (facet == "grid") facet_grid(hcr ~ om_scenario, scales = "free_y")
-     else facet_wrap(~ om_scenario, scales = "free_y")) +
-    labs(x = "Year", y = ylab, colour = NULL, fill = NULL) +
-    coord_cartesian(ylim = if (zoom) NULL else c(0, NA)) +
-    theme_bw(base_size = 20) +
-    theme(legend.position = if (is.null(colour_by)) "none" else "top")
-
-  # ggside theme bits must come after theme_bw() (complete themes reset them)
-  if (!is.null(term_df)) p <- p + theme(ggside.panel.scale.x = 0.2)
-
-  p
+  yearly
 }
 
-# Paired per-replicate comparison --------------------------------------------
-
-# Projection-period summary for every replicate individually.
-rep_perf <- function(om, mode, hcr) {
-  r    <- rec_of(om, mode)[[hcr]]
-  fb   <- fb_of(om, mode)
-  proj <- fb:nrow(r$SSB)
-  data.frame(
-    med_ssb   = apply(r$SSB[proj, , drop = FALSE],   2, median) / 1e5,
-    med_catch = apply(r$Catch[proj, , drop = FALSE], 2, median) / 1e5,
-    catch_aav = catch_aav_reps(r$Catch, proj)
-  )
+# Factor levels fix the facet, legend and panel order in every figure
+set_plot_order <- function(summary_table, hcrs, modes) {
+  summary_table$om_scenario <- factor(summary_table$om_scenario, om_scenario_names)
+  summary_table$hcr         <- factor(summary_table$hcr, hcrs)
+  summary_table$mode        <- factor(summary_table$mode, unname(mode_labels[modes]))
+  summary_table
 }
 
-# The two run sets share operating model, seeds and recruitment deviations, so
-# replicate j is the same underlying future in both. Differencing replicate by
-# replicate removes that shared variability, leaving the effect of assessment
-# error plus a simulation interval for it.
-# Replicates whose perfect-information value is zero (fully closed fishery) give
-# no defined percent change and are dropped; n_used reports how many remain.
-# probs defaults to the interquartile range: the 5-95% range of a per-replicate
-# ratio has a very heavy tail under the Crash OM (single replicates swing from
-# -97% to +780% when a threshold rule opens in one run and closes in the other),
-# which is real but swamps the median effect on any shared axis.
-paired_change <- function(vars = c("med_catch", "catch_aav", "med_ssb"),
-                          hcrs = hcr_levels, oms = om_levels,
-                          probs = c(0.25, 0.75)) {
-  df <- do.call(rbind, lapply(oms, function(om)
-    do.call(rbind, lapply(hcrs, function(h) {
-      a <- rep_perf(om, "asmt", h)
-      n <- rep_perf(om, "noasmt", h)
-      do.call(rbind, lapply(vars, function(v) {
-        ch <- 100 * (a[[v]] - n[[v]]) / n[[v]]
-        ch[!is.finite(ch)] <- NA_real_
-        data.frame(om_scenario = om, hcr = h, var = v,
-                   med = median(ch, na.rm = TRUE),
-                   lwr = unname(quantile(ch, probs[1], na.rm = TRUE)),
-                   upr = unname(quantile(ch, probs[2], na.rm = TRUE)),
-                   n_used = sum(!is.na(ch)))
-      }))
-    }))))
-  df$om_scenario <- factor(df$om_scenario, levels = om_levels)
-  df$hcr         <- factor(df$hcr, levels = hcrs)
-  df
+
+# Long frames --------------------------------------------------------------
+
+# Median and interval by year for one metric: one row per OM scenario, mode,
+# rule and year.
+build_timeseries <- function(metric, hcrs = hcr_names, modes = names(mode_labels),
+                             om_scenarios = om_scenario_names) {
+  all_rows <- list()
+  for (om_scenario in om_scenarios) {
+    for (mode in modes) {
+      for (hcr in hcrs) {
+        run <- get_run(om_scenario, mode, hcr)
+        metric_data <- get_metric(run, metric)
+
+        all_rows[[paste(om_scenario, mode, hcr)]] <- data.frame(
+          om_scenario = om_scenario,
+          mode        = unname(mode_labels[mode]),
+          hcr         = hcr,
+          summarize_replicates(metric_data$values, metric_data$years)
+        )
+      }
+    }
+  }
+  set_plot_order(bind_rows(all_rows), hcrs, modes)
+}
+
+# Catch AAV for one replicate: year-on-year change over total catch
+catch_aav_one_replicate <- function(catch) {
+  if (sum(head(catch, -1)) == 0) return(NA)
+  sum(abs(diff(catch))) / sum(head(catch, -1))
+}
+
+# One row per OM scenario, mode and rule, all scored over the projection
+# period. The column names are the ones grid_metrics.csv already uses.
+#   med_ssb, med_catch  median over every projection year and replicate
+#   catch_aav           the median replicate's catch variability
+#   p_crash             share of replicate-years under the depletion threshold
+#   p_closure           share of replicate-years with no catch at all
+#   term_status         median SSB/Bx in the final year
+performance_metrics <- function(hcrs = hcr_names, modes = names(mode_labels),
+                                om_scenarios = om_scenario_names) {
+  all_rows <- list()
+  for (om_scenario in om_scenarios) {
+    for (mode in modes) {
+      for (hcr in hcrs) {
+        run              <- get_run(om_scenario, mode, hcr)
+        projection_ssb   <- run$ssb[run$projection_rows, , drop = FALSE]
+        projection_catch <- run$catch[run$projection_rows, , drop = FALSE]
+        status           <- get_metric(run, "status")$values
+
+        all_rows[[paste(om_scenario, mode, hcr)]] <- data.frame(
+          om_scenario = om_scenario,
+          mode        = unname(mode_labels[mode]),
+          hcr         = hcr,
+          med_ssb     = median(projection_ssb),
+          med_catch   = median(projection_catch),
+          catch_aav   = median(apply(projection_catch, 2, catch_aav_one_replicate),
+                               na.rm = TRUE),
+          p_crash     = mean(sweep(projection_ssb, 2, crash_threshold(run), "<")),
+          p_closure   = mean(projection_catch == 0),
+          term_status = median(status[nrow(status), ], na.rm = TRUE)
+        )
+      }
+    }
+  }
+  set_plot_order(bind_rows(all_rows), hcrs, modes)
 }
