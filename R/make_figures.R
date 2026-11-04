@@ -217,9 +217,9 @@ demographics <- bind_rows(
   tibble(sex = 1, source = "Population", age = ages,
          value = sim_list$MatAA[1, 1, 1, 1, , 1, 1],
          quantity = "Maturity-at-age"),
-  # natural mortality: no season dimension, and flat over years, ages and sims
+  # natural mortality: flat over years, ages and sims; season dimension is length 1 here
   expand_grid(sex = 1:2, source = "Population") %>%
-    mutate(values = map(sex, \(sex_index) sim_list$natmort[1, 1, 1, , sex_index, 1])) %>%
+    mutate(values = map(sex, \(sex_index) sim_list$natmort[1, 1, 1, 1, , sex_index, 1])) %>%
     unnest_longer(values, values_to = "value") %>%
     mutate(age = rep(ages, 2), quantity = "Natural mortality")
 ) %>%
