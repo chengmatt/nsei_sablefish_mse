@@ -152,12 +152,7 @@ run_single_sim <- function(sim, sim_list, scenario, use_true_values) {
       }
 
       # Get Reference Points
-      # closure years (F = 0) need patched F values, where the ref-point optimizer needs a
-      # nonzero F pattern (input 1), and the advice projection needs a nonzero F for
-      # its fleet split but should treat the closed current year as ~unfished
-      # (input 1e-4; input 1 would crash the projected stock and delay reopening).
-      # both patches go on isolated copies -- sim_env is an environment, so plain
-      # assignment aliases it and the patch would end up in the stored OM outputs
+      # set closure years with small value to avoid NaN
       tmp_sim_env <- sim_env
       proj_sim_env <- sim_env
       if (sim_env$Fmort[,y,,,sim] == 0) {
