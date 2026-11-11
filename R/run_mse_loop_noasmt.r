@@ -324,7 +324,7 @@ saveRDS(all_results, here("outputs", "regime_results_noasmt.RDS"))
 
 # Run Crash MSE -----------------------------------------------------------------
 options(future.globals.maxSize = 5 * 1024^3)
-plan(multisession, workers = availableCores() - 3)
+plan(multisession, workers = availableCores() - 5)
 
 # Read in MSE OM
 sim_list <- readRDS(here("outputs", 'bh_crash_mse_om.RDS'))
